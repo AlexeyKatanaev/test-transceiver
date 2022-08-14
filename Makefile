@@ -29,5 +29,3 @@ prebuild:
 .PHONY: clean
 clean:
 	rm -rf $(BINDIR)/* $(OBJDIR)/* 
-
--include $(DEPS)
