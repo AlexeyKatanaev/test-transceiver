@@ -8,56 +8,87 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #include "healthcheck.h"
 
-timer_t g_timerid;
-unsigned int g_timerIntervalSec = 1;
-
-int TriggerHealthcheckTimer()
+struct sHealthCheck
 {
+    Transceiver tcvr;
+    Amplifier amp;
+    timer_t timerid;
+    unsigned int checkIntervalSec;
+};
+
+
+int TriggerHealthCheckTimer(HealthCheck healthcheck)
+{
+    assert(healthcheck);
+    
     struct itimerspec trigger;
+
+    if (!healthcheck->tcvr && !healthcheck->amp)
+    {
+        fprintf(stderr, "Transceiver and Amplifier was not specified. No reasons to create health checker\n");
+        return -1;
+    }
+    
     memset(&trigger, 0, sizeof(struct itimerspec));
-    trigger.it_value.tv_sec = g_timerIntervalSec;
-    return timer_settime(g_timerid, 0, &trigger, NULL);
+    trigger.it_value.tv_sec = healthcheck->checkIntervalSec;
+    return timer_settime(healthcheck->timerid, 0, &trigger, NULL);
 }
 
 
-void handler(union sigval sv)
+void HealthCheckHandler(union sigval sv)
 {
-    Transceiver t = sv.sival_ptr;
-    fprintf(stderr, "Transceiver state: %d\n", Transceiver_GetState(t));
+    HealthCheck healthcheck = sv.sival_ptr;
+    if (healthcheck->tcvr)
+    {
+        fprintf(stderr, "Transceiver state: %d\n", Transceiver_GetState(healthcheck->tcvr));
+    }
+    if (healthcheck->amp)
+    {
+        fprintf(stderr, "Amplifier state: %d\n", Amplifier_GetState(healthcheck->amp));
+    }
     
-    if (TriggerHealthcheckTimer() != 0)
+    if (TriggerHealthCheckTimer(healthcheck) != 0)
     {
         fprintf(stderr, "Cannot retrigger timer: %s\n", strerror(errno));
         // TODO: Smth is wrong. Cannot track server state. Send sigterm and restart app
     }
 }
 
-
-int Healthcheck_Initialize(Transceiver t, unsigned int checkIntervalSec)
+HealthCheck HealthCheck_Create(Transceiver tcvr, Amplifier amp, unsigned int checkIntervalSec)
 {
-    assert(!g_timerid); // Redesign g_timerid if we want to track several instances
-    fprintf(stderr, "Creating timer to handle object state every %d sec\n", checkIntervalSec);
+    HealthCheck instance = malloc(sizeof(struct sHealthCheck));
+    instance->tcvr = tcvr;
+    instance->amp = amp;
+    instance->checkIntervalSec = checkIntervalSec;
+    instance->timerid = 0;
+    return instance;
+}
+
+int HealthCheck_Start(HealthCheck healthcheck)
+{
+    assert(healthcheck);
 
     struct sigevent sev;
+    int ret;
+
+    fprintf(stderr, "Creating timer to handle object state every %d sec\n", healthcheck->checkIntervalSec);
+
     memset(&sev, 0, sizeof(struct sigevent));
-
-    g_timerIntervalSec = checkIntervalSec;
-
     sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_notify_function = &handler;
-    sev.sigev_value.sival_ptr = t;
-
-    int status = timer_create(CLOCK_REALTIME, &sev, &g_timerid);
-    if (status != 0)
+    sev.sigev_notify_function = &HealthCheckHandler;
+    sev.sigev_value.sival_ptr = healthcheck;
+    ret = timer_create(CLOCK_REALTIME, &sev, &healthcheck->timerid);
+    if (ret != 0)
     {
         // TODO: Handle EAGAIN and add retry mechanism
         fprintf(stderr, "Cannot create timer: %s\n", strerror(errno));
         return -1;
     }
-    if (TriggerHealthcheckTimer() != 0)
+    if (TriggerHealthCheckTimer(healthcheck) != 0)
     {
         fprintf(stderr, "Cannot initialize timer!\n");
         return -1;
@@ -65,11 +96,12 @@ int Healthcheck_Initialize(Transceiver t, unsigned int checkIntervalSec)
     return 0;
 }
 
-void Healthcheck_Destroy()
+void HealthCheck_Stop(HealthCheck healthcheck)
 {
+    assert(healthcheck);
     fprintf(stderr, "Destroying healthcheck timer\n");
-    int status = timer_delete(g_timerid);
-    if (status != 0)
+    int ret = timer_delete(healthcheck->timerid);
+    if (ret != 0)
     {
         fprintf(stderr, "Cannot destroy timer: %s\n", strerror(errno));
     }

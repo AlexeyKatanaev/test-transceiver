@@ -2,30 +2,30 @@
 #include <stdlib.h>
 #include "transceiver.h"
 
-struct transceiver_s
+struct sTransceiver
 {
     TransceiverState state;
-    unsigned int last_update;
+    unsigned int lastUpdate;
 };
 
 
 Transceiver Transceiver_Create()
 {   
-    Transceiver instance = malloc(sizeof(struct transceiver_s));
+    Transceiver instance = malloc(sizeof(struct sTransceiver));
     instance->state = TRANSCEIVER_STATE_OFF;
-    instance->last_update = 0;
+    instance->lastUpdate = 0;
     return instance;
 }
 
 
-void Transceiver_SetState(Transceiver t, TransceiverState state)
+void Transceiver_SetState(Transceiver tcvr, TransceiverState state)
 {
-    t->state = state;
-    t->last_update = (unsigned)time(NULL);
+    tcvr->state = state;
+    tcvr->lastUpdate = (unsigned)time(NULL);
 }
 
 
-TransceiverState Transceiver_GetState(Transceiver t)
+TransceiverState Transceiver_GetState(Transceiver tcvr)
 {
-    return t->state;
+    return tcvr->state;
 }
