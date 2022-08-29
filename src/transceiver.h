@@ -15,10 +15,11 @@
 
 typedef enum
 {
-    TRANSCEIVER_STATE_OFF = 0x0,
-    TRANSCEIVER_STATE_RX,
-    TRANSCEIVER_STATE_TX,
-    TRANSCEIVER_STATE_RXTX
+    TRANSCEIVER_STATE_RX   = 0x0,
+    TRANSCEIVER_STATE_TX   = 0x1,
+    TRANSCEIVER_STATE_RXTX = 0x2,
+
+    TRANSCEIVER_STATE_OFF  = 0xFF
 } TransceiverState;
 
 typedef struct sTransceiver *Transceiver;
@@ -43,3 +44,12 @@ void Transceiver_SetState(Transceiver tcvr, TransceiverState state);
  * @return TransceiverState 
  */
 TransceiverState Transceiver_GetState(Transceiver tcvr);
+
+
+/**
+ * @brief Transceiver state to string representation
+ * 
+ * @param state 
+ * @return const char* 
+ */
+const char* Transceiver_StateToStr(TransceiverState state);

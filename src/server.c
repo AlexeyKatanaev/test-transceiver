@@ -4,8 +4,6 @@
  * @brief The main module that implements the UDP server on the specified port to process requests to control Transceiver/Amplifier.
  * Server also uses health check mechanism to report their state to stderr.
  * 
- * TODO:
- *  * Implement handling UDP messages
  * @version 0.1
  * @date 2022-08-24
  * 
@@ -23,18 +21,97 @@
 #include <sys/poll.h>
 
 #include "transceiver.h"
+#include "amplifier.h"
 #include "healthcheck.h"
 
 
-struct sCommand
+typedef enum
 {
-    enum {
-        COMMAND_AMPLIFIER = 0x0,
-        COMMAND_TRANSCEIVER
-    } Device;
-    int numOfActions;
-    int* actions;
-};
+    DEVICE_AMPLIFIER = 0x0,
+    DEVICE_TRANSCEIVER,
+
+    DEVICE_UNKNOWN = 0xFF
+
+} DeviceTag;
+
+static void PrintHelp();
+/***
+ * Function parse port number from input parameter "-p" <port int value>
+ ***/
+static int GetPortNumberFromParams(int argc, char** argv);
+/**
+ * @brief Create UDP socket with O_NONBLOCK flag
+ * 
+ * @param port - socket port
+ * @return int :
+ * 0 - if success, -1 when failed
+ */
+static int CreateSocket(int port);
+/**
+ * @brief Function extracting TLV message from input socket, aplying commands and send input message back
+ * 
+ * @param socketfd 
+ */
+static void HandleSocketMsg(int socketfd, Transceiver tcvr, Amplifier amp);
+
+
+int main(int argc, char** argv)
+{
+    int activePort;
+    int socketfd;
+    Transceiver transceiver;
+    Amplifier amplifier;
+    HealthCheck healthcheck;
+
+    activePort = GetPortNumberFromParams(argc, argv);
+    if (activePort < 4096 || activePort > 65535)
+    {
+        PrintHelp();
+        return EXIT_FAILURE;
+    }
+
+    transceiver = Transceiver_Create();
+    amplifier = Amplifier_Create();
+    healthcheck = HealthCheck_Create(transceiver, amplifier, 1); 
+    
+    if (HealthCheck_Start(healthcheck) != 0)
+    {
+        fprintf(stderr, "Server starting failed! Cannot initialize healthcheck. Try to restart...\n");
+        return EXIT_FAILURE;
+    }
+
+    fprintf(stderr, "Creating UDP server on port %d\n", activePort);
+    if ((socketfd = CreateSocket(activePort)) < 0)
+    {
+        fprintf(stderr, "Cannot create socket: %s\n", strerror(errno));
+        return EXIT_FAILURE;
+    }
+
+    while(1)
+    {
+        struct pollfd fds[1];
+        fds[0].fd = socketfd;
+        fds[0].events = POLLIN;
+
+        int ret = poll(fds, 1, -1);
+        if ( ret == -1 )
+        {
+            fprintf(stderr, "Failed to execute poll operation: %s\n", strerror(errno));
+            continue;  // error counter + break?
+        }
+
+        if (fds[0].revents & POLLIN)
+        {
+            HandleSocketMsg(socketfd, transceiver, amplifier);
+        }   
+    }
+
+    fprintf(stderr, "Stopping server...\n");
+    close(socketfd);
+    HealthCheck_Stop(healthcheck);
+
+    return EXIT_SUCCESS;
+}
 
 
 void PrintHelp()
@@ -44,9 +121,7 @@ void PrintHelp()
     fprintf(stderr, "\t-p <port number> - The port number for the udp socket on which signals will be received. [4096-65535]\n");
 }
 
-/***
- * Function parse port number from input parameter "-p" <port int value>
- ***/
+
 int GetPortNumberFromParams(int argc, char** argv)
 {
     for(int idx = 0; idx < argc; idx++)
@@ -59,13 +134,7 @@ int GetPortNumberFromParams(int argc, char** argv)
     return -1;
 }
 
-/**
- * @brief Create UDP socket with O_NONBLOCK flag
- * 
- * @param port - socket port
- * @return int :
- * 0 - if success, -1 when failed
- */
+
 int CreateSocket(int port)
 {
     int socketfd;
@@ -105,77 +174,83 @@ int CreateSocket(int port)
     return socketfd;
 }
 
-
-// void ReadMsgFromSocket(int socketfd)
-// {
-//     int msg_len = 0;
-//     if ((msg_len = recvfrom(socketfd, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen)) == -1)
-//     {
-//         die("recvfrom()");
-//     }
-// }
-
-
-int main(int argc, char** argv)
+void HandleSocketMsg(int socketfd, Transceiver tcvr, Amplifier amp)
 {
-    int activePort;
-    int socketfd;
-    Transceiver transceiver;
-    HealthCheck healthcheck;
+    #define BUFSIZE 1024
+    int msgLen = 0;
+    DeviceTag deviceTag = DEVICE_UNKNOWN;
+    int commandsCount = 0;
+    char buf[BUFSIZE];
+    struct sockaddr fromAddr;
+    socklen_t fromAddrLen;
 
-    activePort = GetPortNumberFromParams(argc, argv);
-    if (activePort < 4096 || activePort > 65535)
+    // Receive TLV message
+    msgLen = recvfrom(socketfd, buf, BUFSIZE, 0, &fromAddr, &fromAddrLen);
+    if (msgLen == -1)
     {
-        PrintHelp();
-        return EXIT_FAILURE;
+        fprintf(stderr, "Cannot read message from socket! %s\n", strerror(errno));
+        return;
+    }
+    if (msgLen < 3)
+    {
+        fprintf(stderr, "Incorrect message length! %d", msgLen);
+        return;
     }
 
-    transceiver = Transceiver_Create();
-    healthcheck = HealthCheck_Create(transceiver, NULL, 1); 
-    
-    if (HealthCheck_Start(healthcheck) != 0)
+    // Parse and validate TLV message
+    // +-------------+----------------+-------------------------------+
+    // |  0-1 byte   |    2-3 byte    |          4-... byte           |
+    // +-------------+----------------+-------------------------------+
+    // | Device Tag  | Commands Count | Commands (1 byte per command) |
+    // +-------------+----------------+-------------------------------+
+    // Tag: 2 bytes
+    switch ((int)buf[0] << 4 | buf[1])
     {
-        fprintf(stderr, "Server starting failed! Cannot initialize healthcheck. Try to restart...\n");
-        return EXIT_FAILURE;
+        case 0x00: deviceTag = DEVICE_AMPLIFIER; break;
+        case 0x01: deviceTag = DEVICE_TRANSCEIVER; break;
+        default:
+            fprintf(stderr, "Unknown Tag! Skiping message...\n");
+            return;
     }
 
-    fprintf(stderr, "Creating UDP server on port %d\n", activePort);
-    if ((socketfd = CreateSocket(activePort)) < 0)
+    // Length: 2 bytes
+    commandsCount = (int)buf[2] << 4 | buf[3];
+    if (commandsCount < 1 || commandsCount != msgLen - 4)
     {
-        fprintf(stderr, "Cannot create socket: %s\n", strerror(errno));
-        return EXIT_FAILURE;
+        fprintf(stderr, "Length is incorrect! Skipping message...\n");
+        return;
     }
 
-    while(1)
+    // Value: Commands in the buffer start from the 5th byte
+    for (int cmdIdx = 0; cmdIdx < commandsCount; cmdIdx++)
     {
-        struct pollfd fds[1];
-        fds[0].fd = socketfd;
-        fds[0].events = POLLIN;
-
-        int ret = poll(fds, 1, -1);
-        if ( ret == -1 )
+        int command = (int)buf[4 + cmdIdx];
+        switch (deviceTag)
         {
-            fprintf(stderr, "Failed to execute poll operation: %s\n", strerror(errno));
-            continue;
+        case DEVICE_AMPLIFIER:
+            if (command < AMPLIFIER_STATE_OFF || command > AMPLIFIER_STATE_ON)
+            {
+                fprintf(stderr, "Incorrect command (%d) for Amplifier by index: %d. Skipping...\n", command, cmdIdx);
+                continue;
+            }
+            Amplifier_SetState(amp, command);
+            break;
+        case DEVICE_TRANSCEIVER:
+            if (command < TRANSCEIVER_STATE_RX || command > TRANSCEIVER_STATE_RXTX)
+            {
+                fprintf(stderr, "Incorrect command (%d) for Transceiver by index: %d. Skipping...\n", command, cmdIdx);
+                continue;
+            }
+            Transceiver_SetState(tcvr, command);
+            break;
+        default:
+            break;
         }
-        if (ret == 0) continue;
-
-        if (fds[0].revents & POLLIN)
-        {
-            fds[0].revents = 0;
-            // if ((recv_len = recvfrom(s, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen)) == -1)
-            // {
-            //     die("recvfrom()");
-            // }
-            // fprintf(stderr, "Some msg from socket\n");
-        }   
     }
 
-    close(socketfd);
-    HealthCheck_Stop(healthcheck);
-    free(healthcheck);
-    free(transceiver);
-
-    fprintf(stderr, "Stopping server...\n");
-    return EXIT_SUCCESS;
+    // Send original message back
+    if (sendto(socketfd, buf, msgLen, MSG_DONTWAIT, &fromAddr, fromAddrLen) == -1)
+    {
+        fprintf(stderr, "Cannot send response to destination: %s! %s\n", fromAddr.sa_data, strerror(errno));   
+    }
 }

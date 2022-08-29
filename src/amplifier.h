@@ -18,7 +18,7 @@
 typedef enum
 {
     AMPLIFIER_STATE_OFF = 0x0,
-    AMPLIFIER_STATE_ON
+    AMPLIFIER_STATE_ON  = 0x1
 } AmplifierState;
 
 typedef struct sAmplifier *Amplifier;
@@ -44,3 +44,11 @@ void Amplifier_SetState(Amplifier amp, AmplifierState state);
  * @return AmplifierState 
  */
 AmplifierState Amplifier_GetState(Amplifier amp);
+
+/**
+ * @brief Convert enum to string representation
+ * 
+ * @param state 
+ * @return const char* 
+ */
+const char* Amplifier_StateToStr(AmplifierState state);

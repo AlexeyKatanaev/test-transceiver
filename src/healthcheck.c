@@ -24,7 +24,7 @@ struct sHealthCheck
 int TriggerHealthCheckTimer(HealthCheck healthcheck)
 {
     assert(healthcheck);
-    
+
     struct itimerspec trigger;
 
     if (!healthcheck->tcvr && !healthcheck->amp)
@@ -44,17 +44,17 @@ void HealthCheckHandler(union sigval sv)
     HealthCheck healthcheck = sv.sival_ptr;
     if (healthcheck->tcvr)
     {
-        fprintf(stderr, "Transceiver state: %d\n", Transceiver_GetState(healthcheck->tcvr));
+        fprintf(stderr, "Transceiver state: %s\n", Transceiver_StateToStr(Transceiver_GetState(healthcheck->tcvr)));
     }
     if (healthcheck->amp)
     {
-        fprintf(stderr, "Amplifier state: %d\n", Amplifier_GetState(healthcheck->amp));
+        fprintf(stderr, "Amplifier state: %s\n", Amplifier_StateToStr(Amplifier_GetState(healthcheck->amp)));
     }
     
     if (TriggerHealthCheckTimer(healthcheck) != 0)
     {
         fprintf(stderr, "Cannot retrigger timer: %s\n", strerror(errno));
-        // TODO: Smth is wrong. Cannot track server state. Send sigterm and restart app
+        // TODO: Smth is wrong. Cannot track server state. Exit?
     }
 }
 
