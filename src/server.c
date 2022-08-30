@@ -182,7 +182,7 @@ void HandleSocketMsg(int socketfd, Transceiver tcvr, Amplifier amp)
     int commandsCount = 0;
     char buf[BUFSIZE];
     struct sockaddr fromAddr;
-    socklen_t fromAddrLen;
+    socklen_t fromAddrLen = sizeof(fromAddr);
 
     // Receive TLV message
     msgLen = recvfrom(socketfd, buf, BUFSIZE, 0, &fromAddr, &fromAddrLen);

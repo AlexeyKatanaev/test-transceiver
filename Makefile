@@ -26,6 +26,10 @@ prebuild:
 	@mkdir -p $(OBJDIR)
 	@mkdir -p $(BINDIR)
 
-.PHONY: clean
+test: all
+	@pip3 install -r test/integration/requirements.txt
+	@python3 -m pytest test/integration/
+
+.PHONY: all test clean
 clean:
 	rm -rf $(BINDIR)/* $(OBJDIR)/* 

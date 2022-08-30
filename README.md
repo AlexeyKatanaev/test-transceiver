@@ -8,24 +8,26 @@ change state of the transciever and amplifier.
 UPD messages has TLV format (tag-length-value) and one message can contain several commands.
 Server reports the current state to stderr every second.
 
-# TODO:
-* Implement function to handle TLV message from UDP socket
-* Add Amplifier entinty
-
 
 ## Requirements
-* POSIX
+* Linux
 * GNU Make >= 4.2
 * GCC > 3.4
+* Python 3.6+ (for tests)
 
 
 # Build & Run
-Build server app via make
+To build server
 ```
 make all
 ```
 
-Run server
+To execute tests
+```
+make test
+```
+
+To run server
 ```
 ./bin/server -p <port>
 ```
